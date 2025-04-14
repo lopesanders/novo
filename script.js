@@ -4,23 +4,47 @@ const ctx = canvas.getContext('2d');
 const downloadBtn = document.getElementById('downloadBtn');
 const shareBtn = document.getElementById('shareBtn');
 const loadingMessage = document.getElementById('loadingMessage');
+const instructionMessage = document.getElementById('instructionMessage');
 
 // --- CONFIGURAÇÃO ---
-const templateImagePath = 'template.png'; // Certifique-se que este arquivo existe na mesma pasta!
-const outputFilename = 'minha-imagem-personalizada.png'; // Nome do arquivo para download
+const templateImagePath = 'template.png'; // Certifique-se que este arquivo existe!
+const outputFilename = 'minha-imagem-personalizada.png';
+const ZOOM_SENSITIVITY = 0.002; // Ajuste a sensibilidade do zoom do scroll
+const MIN_ZOOM = 0.1; // Zoom mínimo permitido
+const MAX_ZOOM = 5.0; // Zoom máximo permitido
 // --- FIM DA CONFIGURAÇÃO ---
 
 let userImage = null;
 let templateImage = null;
-let combinedImageBlob = null; // Para armazenar o Blob para compartilhamento
+let combinedImageBlob = null;
 
-// Carrega a imagem do template uma vez
-function loadTemplateImage() {
+// Estado da imagem do usuário
+let scale = 1;
+let offsetX = 0;
+let offsetY = 0;
+
+// Estado do arraste (pan)
+let isDragging = false;
+let startX;
+let startY;
+
+// Variáveis para armazenar as dimensões do template
+let templateWidth = 0;
+let templateHeight = 0;
+
+
+// Carrega a imagem do template e define as dimensões do canvas
+function loadTemplateAndSetupCanvas() {
     return new Promise((resolve, reject) => {
         templateImage = new Image();
-        // Prevenir problemas de CORS se a imagem estiver em outro domínio (não deve acontecer aqui)
-        // templateImage.crossOrigin = "Anonymous";
-        templateImage.onload = () => resolve(templateImage);
+        templateImage.onload = () => {
+            // Define o tamanho do canvas baseado no template
+            templateWidth = templateImage.naturalWidth;
+            templateHeight = templateImage.naturalHeight;
+            canvas.width = templateWidth;
+            canvas.height = templateHeight;
+            resolve(templateImage); // Resolve quando o template carregar
+        };
         templateImage.onerror = (err) => {
             console.error("Erro ao carregar a imagem do template:", err);
             alert(`Erro ao carregar o template (${templateImagePath}). Verifique se o arquivo existe.`);
@@ -30,164 +54,296 @@ function loadTemplateImage() {
     });
 }
 
-// Função para desenhar as imagens no canvas
-function drawImages() {
+// Redesenha o canvas com base no estado atual (imagem, template, scale, offset)
+function redrawCanvas() {
     if (!userImage || !templateImage) return;
 
-    // Define o tamanho do canvas igual ao da imagem do usuário
-    // Isso preserva a resolução original da foto enviada
-    canvas.width = userImage.naturalWidth;
-    canvas.height = userImage.naturalHeight;
-
-    // Limpa o canvas (caso uma imagem anterior tenha sido carregada)
+    // Limpa o canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 1. Desenha a imagem do usuário (fundo)
-    ctx.drawImage(userImage, 0, 0, canvas.width, canvas.height);
+    // 1. Desenha a imagem do usuário (transformada)
+    // Salva o estado atual do canvas (para não afetar o template)
+    ctx.save();
+    // Aplica o deslocamento (pan) e a escala (zoom)
+    // A ordem é importante: primeiro translação, depois escala pode ser mais simples
+    // Ou use drawImage com 9 argumentos para definir source/destination rects
+    // drawImage(image, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
+    // Para simplificar, desenhamos a imagem inteira escalada na posição offset
+    ctx.drawImage(
+        userImage,
+        offsetX, // Posição X no canvas
+        offsetY, // Posição Y no canvas
+        userImage.naturalWidth * scale, // Largura desenhada (com zoom)
+        userImage.naturalHeight * scale // Altura desenhada (com zoom)
+    );
+    // Restaura o estado do canvas (remove transformações)
+    ctx.restore();
 
-    // 2. Desenha a imagem do template por cima
-    // O template será esticado/comprimido para caber exatamente sobre a imagem do usuário.
-    // Se precisar de outro comportamento (ex: manter proporção, centralizar),
-    // cálculos adicionais seriam necessários aqui.
+
+    // 2. Desenha a imagem do template por cima (sempre fixa)
     ctx.drawImage(templateImage, 0, 0, canvas.width, canvas.height);
 
-    // Habilita o botão de download e exibe o canvas
-    downloadBtn.disabled = false;
-    canvas.style.display = 'block'; // Garante que o canvas seja exibido
-    loadingMessage.style.display = 'none'; // Esconde a mensagem de carregamento
-
-    // Prepara para compartilhamento (Web Share API)
+     // Prepara para compartilhamento (Web Share API) - faz isso a cada redesenho
+     // É um pouco ineficiente, poderia otimizar para fazer só antes de compartilhar/baixar
     prepareShare();
 }
 
-// Listener para quando o usuário escolhe um arquivo
-imageLoader.addEventListener('change', (event) => {
-    const file = event.target.files[0];
-    if (!file) {
-        return; // Nenhum arquivo selecionado
-    }
+// Calcula a posição inicial e escala para a imagem do usuário caber no template
+function setInitialImageTransform() {
+    if (!userImage || !templateImage) return;
 
-    // Validação simples de tipo (opcional, mas bom ter)
-    if (!file.type.startsWith('image/')) {
-        alert('Por favor, selecione um arquivo de imagem (JPG, PNG, GIF, etc.).');
+    const imgWidth = userImage.naturalWidth;
+    const imgHeight = userImage.naturalHeight;
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+
+    // Calcula a escala para a imagem caber inteira dentro do canvas (aspect fill)
+    scale = Math.max(canvasWidth / imgWidth, canvasHeight / imgHeight);
+    // Garante que a escala inicial não seja menor que o mínimo
+    scale = Math.max(MIN_ZOOM, scale);
+
+
+    // Centraliza a imagem
+    offsetX = (canvasWidth - imgWidth * scale) / 2;
+    offsetY = (canvasHeight - imgHeight * scale) / 2;
+
+    redrawCanvas();
+}
+
+
+// Listener para quando o usuário escolhe um arquivo
+imageLoader.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (!file || !file.type.startsWith('image/')) {
+        alert('Por favor, selecione um arquivo de imagem válido.');
         imageLoader.value = ''; // Limpa o input
         return;
     }
 
-
-    const reader = new FileReader();
-
     // Mostra mensagem de carregamento e desabilita botões
     loadingMessage.style.display = 'block';
+    instructionMessage.style.display = 'none';
     downloadBtn.disabled = true;
-    shareBtn.style.display = 'none'; // Esconde o botão de compartilhar durante o processo
-    canvas.style.display = 'none'; // Esconde o canvas antigo/vazio
+    shareBtn.style.display = 'none';
+    canvas.style.cursor = 'default'; // Cursor padrão durante carregamento
 
+    try {
+        // 1. Garante que o template está carregado e o canvas dimensionado
+        await loadTemplateAndSetupCanvas();
 
-    reader.onload = (e) => {
-        userImage = new Image();
-        userImage.onload = () => {
-            // Certifica-se que o template está carregado antes de desenhar
-            loadTemplateImage()
-                .then(drawImages)
-                .catch(() => {
-                     // Erro no carregamento do template já foi tratado em loadTemplateImage
-                     loadingMessage.style.display = 'none'; // Esconde msg de loading
-                     imageLoader.value = ''; // Limpa o input
-                });
-        };
-        userImage.onerror = () => {
-            console.error("Erro ao carregar a imagem do usuário.");
-            alert("Ocorreu um erro ao carregar sua imagem. Tente outro arquivo.");
-            loadingMessage.style.display = 'none';
-             imageLoader.value = ''; // Limpa o input
-        };
-        userImage.src = e.target.result; // Define o src da imagem do usuário
-    };
+        // 2. Carrega a imagem do usuário
+        const userImagePromise = new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                userImage = new Image();
+                userImage.onload = resolve;
+                userImage.onerror = reject;
+                userImage.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
 
-    reader.onerror = () => {
-        console.error("Erro ao ler o arquivo.");
-        alert("Não foi possível ler o arquivo selecionado.");
-         loadingMessage.style.display = 'none';
-         imageLoader.value = ''; // Limpa o input
-    };
+        await userImagePromise;
 
-    reader.readAsDataURL(file); // Lê o arquivo como Data URL
+        // 3. Define a transformação inicial e desenha
+        setInitialImageTransform();
+
+        // Habilita controles e mostra instruções
+        downloadBtn.disabled = false;
+        loadingMessage.style.display = 'none';
+        instructionMessage.style.display = 'block';
+        canvas.style.cursor = 'grab'; // Define cursor inicial para arrastar
+
+    } catch (error) {
+        console.error("Erro no processo de carregamento:", error);
+        alert("Ocorreu um erro ao carregar as imagens. Tente novamente.");
+        loadingMessage.style.display = 'none';
+        instructionMessage.style.display = 'none';
+        downloadBtn.disabled = true;
+        shareBtn.style.display = 'none';
+        imageLoader.value = ''; // Limpa o input
+         // Limpa o canvas se algo deu errado
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        userImage = null; // Reseta a imagem do usuário
+    }
 });
 
-// Listener para o botão de download
+// --- Event Handlers para Pan (Arrastar) ---
+
+function getEventLocation(e) {
+    // Pega a posição do mouse ou toque relativa ao canvas
+    if (e.touches && e.touches.length == 1) {
+        return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    } else if (e.clientX && e.clientY) {
+        return { x: e.clientX, y: e.clientY };
+    }
+    return null; // Nenhum evento válido
+}
+
+
+canvas.addEventListener('mousedown', (e) => {
+    if (!userImage) return;
+    isDragging = true;
+    const location = getEventLocation(e);
+    startX = location.x - offsetX; // Armazena posição relativa ao canto da imagem
+    startY = location.y - offsetY;
+    canvas.style.cursor = 'grabbing'; // Muda o cursor
+    e.preventDefault(); // Previne seleção de texto
+});
+
+canvas.addEventListener('touchstart', (e) => {
+     if (!userImage || e.touches.length !== 1) return; // Só ativa com um dedo
+    isDragging = true;
+    const location = getEventLocation(e);
+    startX = location.x - offsetX;
+    startY = location.y - offsetY;
+    // Não muda cursor em touch, mas previne scroll da página
+     e.preventDefault();
+});
+
+
+canvas.addEventListener('mousemove', (e) => {
+    if (!isDragging || !userImage) return;
+    const location = getEventLocation(e);
+    offsetX = location.x - startX;
+    offsetY = location.y - startY;
+    redrawCanvas();
+    e.preventDefault(); // Previne seleção enquanto arrasta
+});
+
+canvas.addEventListener('touchmove', (e) => {
+     if (!isDragging || !userImage || e.touches.length !== 1) return;
+    const location = getEventLocation(e);
+    offsetX = location.x - startX;
+    offsetY = location.y - startY;
+    redrawCanvas();
+     e.preventDefault(); // Previne scroll da página
+});
+
+
+canvas.addEventListener('mouseup', () => {
+    if (!userImage) return;
+    isDragging = false;
+    canvas.style.cursor = 'grab'; // Restaura cursor
+});
+
+canvas.addEventListener('touchend', () => {
+     if (!userImage) return;
+    isDragging = false;
+    // Lógica adicional para pinch zoom iria aqui se implementada
+});
+
+canvas.addEventListener('mouseleave', () => {
+    // Cancela o arraste se o mouse sair do canvas
+    if (isDragging) {
+         if (!userImage) return;
+        isDragging = false;
+        canvas.style.cursor = 'grab';
+    }
+});
+
+
+// --- Event Handler para Zoom (Scroll do Mouse) ---
+
+canvas.addEventListener('wheel', (e) => {
+    if (!userImage) return;
+    e.preventDefault(); // Previne o scroll da página
+
+    const rect = canvas.getBoundingClientRect();
+    // Posição do mouse relativa ao canvas
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Calcula a posição do ponteiro do mouse sobre a imagem (antes do zoom)
+    const imgX = (mouseX - offsetX) / scale;
+    const imgY = (mouseY - offsetY) / scale;
+
+    // Calcula a nova escala
+    let delta = e.deltaY * ZOOM_SENSITIVITY;
+    let newScale = scale - delta; // Subtrai porque deltaY é positivo para scroll "para baixo" (zoom out)
+
+    // Limita a escala
+    newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newScale));
+
+    // Calcula o novo offset para manter o ponto sob o mouse fixo
+    offsetX = mouseX - imgX * newScale;
+    offsetY = mouseY - imgY * newScale;
+    scale = newScale; // Atualiza a escala global
+
+    redrawCanvas();
+});
+
+
+// --- Botão de Download (sem alterações na lógica principal) ---
 downloadBtn.addEventListener('click', () => {
-    if (!userImage) return; // Não faz nada se não houver imagem
+    if (!userImage || !templateImage) return;
 
-    // Cria um link temporário
+    // A função redrawCanvas já garante que o canvas está como o usuário vê.
+    // Apenas criamos o link e baixamos o conteúdo atual do canvas.
     const link = document.createElement('a');
-
-    // Define o Href com os dados da imagem do canvas (em formato PNG)
-    link.href = canvas.toDataURL('image/png'); // Use 'image/jpeg' se preferir JPG
-
-    // Define o nome do arquivo para download
+    link.href = canvas.toDataURL('image/png');
     link.download = outputFilename;
-
-    // Simula um clique no link para iniciar o download
-    document.body.appendChild(link); // Necessário para Firefox
+    document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link); // Limpa o link temporário
+    document.body.removeChild(link);
 });
 
-
-// --- Funcionalidade de Compartilhamento (Web Share API) ---
+// --- Funcionalidade de Compartilhamento (sem alterações na lógica principal) ---
 
 function prepareShare() {
-    // Verifica se a Web Share API está disponível
-    if (navigator.share) {
-         // Converte o canvas para Blob (melhor para compartilhar que Data URL)
-        canvas.toBlob( (blob) => {
-            if (blob) {
-                combinedImageBlob = blob;
-                 shareBtn.style.display = 'inline-block'; // Mostra o botão
-            } else {
-                console.error("Falha ao criar Blob da imagem.");
-                shareBtn.style.display = 'none';
-            }
-        }, 'image/png'); // O tipo MIME deve corresponder ao formato desejado
-
-    } else {
-        console.log("Web Share API não suportada neste navegador.");
-        shareBtn.style.display = 'none'; // Esconde o botão se não for suportado
+    if (!navigator.share || !canvas || canvas.width === 0) {
+         shareBtn.style.display = 'none'; // Esconde se não suportado ou canvas vazio
+         combinedImageBlob = null;
+        return;
     }
+
+    canvas.toBlob( (blob) => {
+        if (blob) {
+            combinedImageBlob = blob;
+            // Só mostra o botão se o blob foi criado com sucesso
+            // (Poderia mover a exibição para o final do carregamento da imagem)
+            if(downloadBtn.disabled === false) { // Verifica se imagem está carregada
+                 shareBtn.style.display = 'inline-block';
+            }
+        } else {
+            console.error("Falha ao criar Blob da imagem para compartilhamento.");
+            shareBtn.style.display = 'none';
+             combinedImageBlob = null;
+        }
+    }, 'image/png');
 }
 
 shareBtn.addEventListener('click', async () => {
     if (!combinedImageBlob) {
-        alert("A imagem ainda não está pronta para compartilhar.");
+        alert("A imagem ainda não está pronta para compartilhar ou ocorreu um erro.");
         return;
     }
 
     const shareData = {
-        files: [
-             new File([combinedImageBlob], outputFilename, { type: combinedImageBlob.type })
-        ],
+        files: [ new File([combinedImageBlob], outputFilename, { type: combinedImageBlob.type }) ],
         title: 'Minha Imagem Personalizada',
         text: 'Veja a imagem que criei!',
-        // url: 'https://seu-site.com' // Opcional: adicione um link para seu site
     };
 
     try {
         await navigator.share(shareData);
         console.log('Imagem compartilhada com sucesso!');
     } catch (err) {
-        // O erro 'AbortError' geralmente significa que o usuário cancelou o compartilhamento
         if (err.name !== 'AbortError') {
             console.error('Erro ao compartilhar:', err);
-             alert(`Erro ao compartilhar: ${err.message}`);
+            alert(`Erro ao compartilhar: ${err.message}`);
         } else {
-            console.log('Compartilhamento cancelado pelo usuário.');
+            console.log('Compartilhamento cancelado.');
         }
     }
 });
 
-// Pré-carrega o template ao iniciar (opcional, mas melhora a percepção de velocidade)
-// Comentado para evitar erro se o script carregar antes do DOM, mas pode ser útil
-// window.addEventListener('load', () => {
-//     loadTemplateImage().catch(err => {}); // Carrega e ignora erro inicial se houver
-// });
+// Limpa o estado inicial (caso a página seja recarregada)
+window.addEventListener('load', () => {
+    imageLoader.value = ''; // Garante que o input de arquivo esteja vazio
+    loadingMessage.style.display = 'none';
+    instructionMessage.style.display = 'none';
+    downloadBtn.disabled = true;
+    shareBtn.style.display = 'none';
+});
