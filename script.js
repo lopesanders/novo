@@ -9,7 +9,7 @@ const instructionMessage = document.getElementById('instructionMessage');
 // --- CONFIGURAÇÃO ---
 const templateImagePath = 'template.png'; // Certifique-se que este arquivo existe!
 const outputFilename = 'minha-imagem-personalizada.png';
-const ZOOM_SENSITIVITY = 0.002; // Ajuste a sensibilidade do zoom do scroll
+const ZOOM_SENSITIVITY = 0.002; // Ajuste a sensibilidade do zoom do scroll do mouse
 const MIN_ZOOM = 0.1; // Zoom mínimo permitido
 const MAX_ZOOM = 5.0; // Zoom máximo permitido
 // --- FIM DA CONFIGURAÇÃO ---
@@ -23,27 +23,67 @@ let scale = 1;
 let offsetX = 0;
 let offsetY = 0;
 
-// Estado do arraste (pan)
+// Estado do arraste (pan) e toque
 let isDragging = false;
-let startX;
-let startY;
+let lastDragX; // Para pan com mouse ou 1 dedo
+let lastDragY;
+
+// Estado do Pinch Zoom
+let isPinching = false;
+let initialPinchDistance = null;
+let pinchStartScale = null;
 
 // Variáveis para armazenar as dimensões do template
 let templateWidth = 0;
 let templateHeight = 0;
 
+// --- Funções Auxiliares ---
+
+// Calcula a distância Euclidiana entre dois pontos (dedos)
+function getDistance(touch1, touch2) {
+    const dx = touch1.clientX - touch2.clientX;
+    const dy = touch1.clientY - touch2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+// Calcula o ponto médio entre dois toques, relativo ao canvas
+function getMidpoint(touch1, touch2, canvasRect) {
+    return {
+        x: ((touch1.clientX + touch2.clientX) / 2) - canvasRect.left,
+        y: ((touch1.clientY + touch2.clientY) / 2) - canvasRect.top
+    };
+}
+
+// Pega a posição do evento (mouse ou primeiro toque) relativa ao canvas
+function getEventCanvasLocation(e, canvasRect) {
+    let clientX, clientY;
+    if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    } else if (e.clientX && e.clientY) {
+        clientX = e.clientX;
+        clientY = e.clientY;
+    } else {
+        return null; // Não foi possível determinar a localização
+    }
+    return {
+        x: clientX - canvasRect.left,
+        y: clientY - canvasRect.top
+    };
+}
+
 
 // Carrega a imagem do template e define as dimensões do canvas
 function loadTemplateAndSetupCanvas() {
+    // (Função sem alterações da versão anterior)
     return new Promise((resolve, reject) => {
         templateImage = new Image();
         templateImage.onload = () => {
-            // Define o tamanho do canvas baseado no template
             templateWidth = templateImage.naturalWidth;
             templateHeight = templateImage.naturalHeight;
             canvas.width = templateWidth;
             canvas.height = templateHeight;
-            resolve(templateImage); // Resolve quando o template carregar
+            resolve(templateImage);
         };
         templateImage.onerror = (err) => {
             console.error("Erro ao carregar a imagem do template:", err);
@@ -54,84 +94,59 @@ function loadTemplateAndSetupCanvas() {
     });
 }
 
-// Redesenha o canvas com base no estado atual (imagem, template, scale, offset)
+// Redesenha o canvas
 function redrawCanvas() {
+    // (Função sem alterações significativas na lógica de desenho)
     if (!userImage || !templateImage) return;
-
-    // Limpa o canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // 1. Desenha a imagem do usuário (transformada)
-    // Salva o estado atual do canvas (para não afetar o template)
     ctx.save();
-    // Aplica o deslocamento (pan) e a escala (zoom)
-    // A ordem é importante: primeiro translação, depois escala pode ser mais simples
-    // Ou use drawImage com 9 argumentos para definir source/destination rects
-    // drawImage(image, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
-    // Para simplificar, desenhamos a imagem inteira escalada na posição offset
     ctx.drawImage(
         userImage,
-        offsetX, // Posição X no canvas
-        offsetY, // Posição Y no canvas
-        userImage.naturalWidth * scale, // Largura desenhada (com zoom)
-        userImage.naturalHeight * scale // Altura desenhada (com zoom)
+        offsetX,
+        offsetY,
+        userImage.naturalWidth * scale,
+        userImage.naturalHeight * scale
     );
-    // Restaura o estado do canvas (remove transformações)
     ctx.restore();
-
-
-    // 2. Desenha a imagem do template por cima (sempre fixa)
     ctx.drawImage(templateImage, 0, 0, canvas.width, canvas.height);
-
-     // Prepara para compartilhamento (Web Share API) - faz isso a cada redesenho
-     // É um pouco ineficiente, poderia otimizar para fazer só antes de compartilhar/baixar
-    prepareShare();
+    prepareShare(); // Prepara para compartilhamento a cada redesenho (pode otimizar)
 }
 
-// Calcula a posição inicial e escala para a imagem do usuário caber no template
+// Calcula a transformação inicial da imagem
 function setInitialImageTransform() {
+    // (Função sem alterações da versão anterior)
     if (!userImage || !templateImage) return;
-
     const imgWidth = userImage.naturalWidth;
     const imgHeight = userImage.naturalHeight;
     const canvasWidth = canvas.width;
     const canvasHeight = canvas.height;
-
-    // Calcula a escala para a imagem caber inteira dentro do canvas (aspect fill)
     scale = Math.max(canvasWidth / imgWidth, canvasHeight / imgHeight);
-    // Garante que a escala inicial não seja menor que o mínimo
-    scale = Math.max(MIN_ZOOM, scale);
-
-
-    // Centraliza a imagem
+    scale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scale)); // Garante que esteja dentro dos limites
     offsetX = (canvasWidth - imgWidth * scale) / 2;
     offsetY = (canvasHeight - imgHeight * scale) / 2;
-
     redrawCanvas();
 }
 
 
-// Listener para quando o usuário escolhe um arquivo
+// Listener para carregamento de arquivo
 imageLoader.addEventListener('change', async (event) => {
+    // (Função sem alterações significativas da versão anterior)
     const file = event.target.files[0];
     if (!file || !file.type.startsWith('image/')) {
         alert('Por favor, selecione um arquivo de imagem válido.');
-        imageLoader.value = ''; // Limpa o input
+        imageLoader.value = '';
         return;
     }
-
-    // Mostra mensagem de carregamento e desabilita botões
     loadingMessage.style.display = 'block';
     instructionMessage.style.display = 'none';
     downloadBtn.disabled = true;
     shareBtn.style.display = 'none';
-    canvas.style.cursor = 'default'; // Cursor padrão durante carregamento
+    canvas.style.cursor = 'default';
+    isDragging = false; // Reseta estados
+    isPinching = false;
 
     try {
-        // 1. Garante que o template está carregado e o canvas dimensionado
         await loadTemplateAndSetupCanvas();
-
-        // 2. Carrega a imagem do usuário
         const userImagePromise = new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -143,18 +158,12 @@ imageLoader.addEventListener('change', async (event) => {
             reader.onerror = reject;
             reader.readAsDataURL(file);
         });
-
         await userImagePromise;
-
-        // 3. Define a transformação inicial e desenha
         setInitialImageTransform();
-
-        // Habilita controles e mostra instruções
         downloadBtn.disabled = false;
         loadingMessage.style.display = 'none';
         instructionMessage.style.display = 'block';
-        canvas.style.cursor = 'grab'; // Define cursor inicial para arrastar
-
+        canvas.style.cursor = 'grab';
     } catch (error) {
         console.error("Erro no processo de carregamento:", error);
         alert("Ocorreu um erro ao carregar as imagens. Tente novamente.");
@@ -162,125 +171,175 @@ imageLoader.addEventListener('change', async (event) => {
         instructionMessage.style.display = 'none';
         downloadBtn.disabled = true;
         shareBtn.style.display = 'none';
-        imageLoader.value = ''; // Limpa o input
-         // Limpa o canvas se algo deu errado
+        imageLoader.value = '';
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        userImage = null; // Reseta a imagem do usuário
+        userImage = null;
     }
 });
 
-// --- Event Handlers para Pan (Arrastar) ---
-
-function getEventLocation(e) {
-    // Pega a posição do mouse ou toque relativa ao canvas
-    if (e.touches && e.touches.length == 1) {
-        return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    } else if (e.clientX && e.clientY) {
-        return { x: e.clientX, y: e.clientY };
-    }
-    return null; // Nenhum evento válido
-}
-
+// --- Event Handlers para Mouse (Pan + Zoom com Scroll) ---
 
 canvas.addEventListener('mousedown', (e) => {
-    if (!userImage) return;
+    if (!userImage || isPinching) return; // Não inicia drag do mouse se estiver pinchando
     isDragging = true;
-    const location = getEventLocation(e);
-    startX = location.x - offsetX; // Armazena posição relativa ao canto da imagem
-    startY = location.y - offsetY;
-    canvas.style.cursor = 'grabbing'; // Muda o cursor
-    e.preventDefault(); // Previne seleção de texto
+    const location = getEventCanvasLocation(e, canvas.getBoundingClientRect());
+    lastDragX = location.x - offsetX; // Posição relativa ao canto da imagem
+    lastDragY = location.y - offsetY;
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
 });
-
-canvas.addEventListener('touchstart', (e) => {
-     if (!userImage || e.touches.length !== 1) return; // Só ativa com um dedo
-    isDragging = true;
-    const location = getEventLocation(e);
-    startX = location.x - offsetX;
-    startY = location.y - offsetY;
-    // Não muda cursor em touch, mas previne scroll da página
-     e.preventDefault();
-});
-
 
 canvas.addEventListener('mousemove', (e) => {
-    if (!isDragging || !userImage) return;
-    const location = getEventLocation(e);
-    offsetX = location.x - startX;
-    offsetY = location.y - startY;
+    if (!isDragging || !userImage || isPinching) return;
+    const location = getEventCanvasLocation(e, canvas.getBoundingClientRect());
+    offsetX = location.x - lastDragX;
+    offsetY = location.y - lastDragY;
     redrawCanvas();
-    e.preventDefault(); // Previne seleção enquanto arrasta
+    e.preventDefault();
 });
-
-canvas.addEventListener('touchmove', (e) => {
-     if (!isDragging || !userImage || e.touches.length !== 1) return;
-    const location = getEventLocation(e);
-    offsetX = location.x - startX;
-    offsetY = location.y - startY;
-    redrawCanvas();
-     e.preventDefault(); // Previne scroll da página
-});
-
 
 canvas.addEventListener('mouseup', () => {
     if (!userImage) return;
-    isDragging = false;
-    canvas.style.cursor = 'grab'; // Restaura cursor
-});
-
-canvas.addEventListener('touchend', () => {
-     if (!userImage) return;
-    isDragging = false;
-    // Lógica adicional para pinch zoom iria aqui se implementada
-});
-
-canvas.addEventListener('mouseleave', () => {
-    // Cancela o arraste se o mouse sair do canvas
     if (isDragging) {
-         if (!userImage) return;
         isDragging = false;
         canvas.style.cursor = 'grab';
     }
 });
 
-
-// --- Event Handler para Zoom (Scroll do Mouse) ---
+canvas.addEventListener('mouseleave', () => {
+    if (isDragging) {
+        isDragging = false;
+        canvas.style.cursor = 'grab';
+    }
+});
 
 canvas.addEventListener('wheel', (e) => {
-    if (!userImage) return;
-    e.preventDefault(); // Previne o scroll da página
-
+    // (Função sem alterações da versão anterior - scroll zoom)
+    if (!userImage || isPinching) return; // Não faz zoom com roda se estiver pinchando
+    e.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    // Posição do mouse relativa ao canvas
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-
-    // Calcula a posição do ponteiro do mouse sobre a imagem (antes do zoom)
     const imgX = (mouseX - offsetX) / scale;
     const imgY = (mouseY - offsetY) / scale;
-
-    // Calcula a nova escala
     let delta = e.deltaY * ZOOM_SENSITIVITY;
-    let newScale = scale - delta; // Subtrai porque deltaY é positivo para scroll "para baixo" (zoom out)
-
-    // Limita a escala
+    let newScale = scale - delta;
     newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newScale));
-
-    // Calcula o novo offset para manter o ponto sob o mouse fixo
     offsetX = mouseX - imgX * newScale;
     offsetY = mouseY - imgY * newScale;
-    scale = newScale; // Atualiza a escala global
-
+    scale = newScale;
     redrawCanvas();
 });
 
+// --- Event Handlers para Touch (Pan com 1 dedo + Pinch Zoom com 2 dedos) ---
 
-// --- Botão de Download (sem alterações na lógica principal) ---
+canvas.addEventListener('touchstart', (e) => {
+    if (!userImage) return;
+    e.preventDefault(); // Previne comportamento padrão (scroll, zoom do navegador)
+    const touches = e.touches;
+    const rect = canvas.getBoundingClientRect();
+
+    if (touches.length === 1) {
+        // Início do Pan com 1 dedo
+        isDragging = true;
+        isPinching = false; // Garante que não está pinchando
+        const location = getEventCanvasLocation(e, rect);
+        lastDragX = location.x - offsetX; // Posição relativa ao canto da imagem
+        lastDragY = location.y - offsetY;
+        // console.log("Start Pan (1 touch)");
+
+    } else if (touches.length === 2) {
+        // Início do Pinch Zoom com 2 dedos
+        isDragging = false; // Para o pan
+        isPinching = true;
+        initialPinchDistance = getDistance(touches[0], touches[1]);
+        pinchStartScale = scale; // Armazena a escala atual no início do pinch
+        // console.log("Start Pinch (2 touches)");
+    }
+});
+
+canvas.addEventListener('touchmove', (e) => {
+    if (!userImage) return;
+    e.preventDefault();
+    const touches = e.touches;
+    const rect = canvas.getBoundingClientRect();
+
+    if (isDragging && touches.length === 1) {
+        // Continua o Pan com 1 dedo
+        const location = getEventCanvasLocation(e, rect);
+        offsetX = location.x - lastDragX;
+        offsetY = location.y - lastDragY;
+        redrawCanvas();
+        // console.log("Moving Pan (1 touch)");
+
+    } else if (isPinching && touches.length === 2) {
+        // Continua o Pinch Zoom com 2 dedos
+        const currentDistance = getDistance(touches[0], touches[1]);
+        if (initialPinchDistance == null || pinchStartScale == null) return; // Segurança
+
+        // Calcula a nova escala baseada na mudança da distância
+        const scaleFactor = currentDistance / initialPinchDistance;
+        let newScale = pinchStartScale * scaleFactor;
+
+        // Limita a escala
+        newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newScale));
+
+        // Calcula o ponto médio atual entre os dedos (relativo ao canvas)
+        const midpoint = getMidpoint(touches[0], touches[1], rect);
+
+        // Calcula o fator de mudança de escala para ajustar o offset
+        // Evita recalcular a posição da imagem, ajusta o offset diretamente
+        const scaleDelta = newScale / scale; // Quanto a escala mudou nesta iteração
+
+        // Ajusta o offset para que o ponto médio permaneça estável na tela
+        offsetX = midpoint.x - (midpoint.x - offsetX) * scaleDelta;
+        offsetY = midpoint.y - (midpoint.y - offsetY) * scaleDelta;
+
+        // Atualiza a escala global
+        scale = newScale;
+
+        redrawCanvas();
+        // console.log("Moving Pinch (2 touches), newScale:", newScale);
+    }
+});
+
+canvas.addEventListener('touchend', (e) => {
+    if (!userImage) return;
+    // Não precisa de preventDefault aqui geralmente
+    const touches = e.touches;
+
+    if (e.touches.length === 0) {
+        // Último dedo levantado
+        isDragging = false;
+        isPinching = false;
+        initialPinchDistance = null;
+        pinchStartScale = null;
+        canvas.style.cursor = 'grab'; // Restaura cursor do mouse (se aplicável)
+        // console.log("End All Touches");
+
+    } else if (e.touches.length === 1 && isPinching) {
+        // Um dedo levantado durante um pinch (o outro permanece)
+        // Transiciona de volta para o modo Pan com o dedo restante
+        isPinching = false;
+        isDragging = true;
+        initialPinchDistance = null;
+        pinchStartScale = null;
+        // Atualiza a posição inicial do pan para o dedo restante
+        const rect = canvas.getBoundingClientRect();
+        const location = getEventCanvasLocation(e, rect); // Pega a posição do dedo restante
+        lastDragX = location.x - offsetX;
+        lastDragY = location.y - offsetY;
+        // console.log("End Pinch, Start Pan (1 touch remains)");
+    }
+    // Se touches.length >= 2 (caso raro onde um dedo levanta mas >1 permanecem),
+    // o estado de pinch deve continuar (não fazemos nada de especial aqui).
+});
+
+
+// --- Botão de Download ---
 downloadBtn.addEventListener('click', () => {
+    // (Função sem alterações da versão anterior)
     if (!userImage || !templateImage) return;
-
-    // A função redrawCanvas já garante que o canvas está como o usuário vê.
-    // Apenas criamos o link e baixamos o conteúdo atual do canvas.
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png');
     link.download = outputFilename;
@@ -289,21 +348,18 @@ downloadBtn.addEventListener('click', () => {
     document.body.removeChild(link);
 });
 
-// --- Funcionalidade de Compartilhamento (sem alterações na lógica principal) ---
-
+// --- Funcionalidade de Compartilhamento ---
 function prepareShare() {
-    if (!navigator.share || !canvas || canvas.width === 0) {
-         shareBtn.style.display = 'none'; // Esconde se não suportado ou canvas vazio
+    // (Função sem alterações significativas - apenas verifica se canvas tem tamanho)
+    if (!navigator.share || !canvas || canvas.width === 0 || canvas.height === 0) {
+         shareBtn.style.display = 'none';
          combinedImageBlob = null;
         return;
     }
-
     canvas.toBlob( (blob) => {
         if (blob) {
             combinedImageBlob = blob;
-            // Só mostra o botão se o blob foi criado com sucesso
-            // (Poderia mover a exibição para o final do carregamento da imagem)
-            if(downloadBtn.disabled === false) { // Verifica se imagem está carregada
+            if(downloadBtn.disabled === false) { // Só mostra se imagem carregada
                  shareBtn.style.display = 'inline-block';
             }
         } else {
@@ -315,33 +371,30 @@ function prepareShare() {
 }
 
 shareBtn.addEventListener('click', async () => {
+    // (Função sem alterações da versão anterior)
     if (!combinedImageBlob) {
         alert("A imagem ainda não está pronta para compartilhar ou ocorreu um erro.");
         return;
     }
-
     const shareData = {
         files: [ new File([combinedImageBlob], outputFilename, { type: combinedImageBlob.type }) ],
         title: 'Minha Imagem Personalizada',
         text: 'Veja a imagem que criei!',
     };
-
     try {
         await navigator.share(shareData);
-        console.log('Imagem compartilhada com sucesso!');
     } catch (err) {
         if (err.name !== 'AbortError') {
             console.error('Erro ao compartilhar:', err);
             alert(`Erro ao compartilhar: ${err.message}`);
-        } else {
-            console.log('Compartilhamento cancelado.');
         }
     }
 });
 
-// Limpa o estado inicial (caso a página seja recarregada)
+// --- Limpeza Inicial ---
 window.addEventListener('load', () => {
-    imageLoader.value = ''; // Garante que o input de arquivo esteja vazio
+    // (Função sem alterações da versão anterior)
+    imageLoader.value = '';
     loadingMessage.style.display = 'none';
     instructionMessage.style.display = 'none';
     downloadBtn.disabled = true;
