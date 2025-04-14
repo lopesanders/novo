@@ -137,3 +137,33 @@ button:not(:disabled):hover {
          padding: 8px 15px;
     }
 }
+/* Estilos para a área da imagem de exemplo */
+.example-image-container {
+    margin-top: 30px; /* Espaço acima do exemplo */
+    margin-bottom: 20px; /* Espaço abaixo do exemplo */
+    padding-top: 20px; /* Espaço interno acima */
+    border-top: 1px solid #eee; /* Linha separadora sutil */
+    text-align: center; /* Centraliza o texto e a imagem (se for inline-block ou sem margin auto) */
+}
+
+.example-text {
+    font-size: 0.95em; /* Tamanho do texto de descrição */
+    color: #666;      /* Cor do texto */
+    margin-bottom: 15px; /* Espaço abaixo do texto */
+}
+
+#exampleImage {
+    display: block; /* Para poder usar margin: auto */
+    max-width: 70%;   /* Limita a largura da imagem de exemplo (ajuste conforme necessário) */
+    height: auto;     /* Mantém a proporção da imagem */
+    margin-left: auto; /* Centraliza a imagem horizontalmente */
+    margin-right: auto;/* Centraliza a imagem horizontalmente */
+    border: 1px solid #ccc; /* Borda sutil ao redor */
+    border-radius: 4px; /* Cantos levemente arredondados */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Sombra leve */
+}
+
+/* Ajuste na margem superior do container do canvas, se necessário */
+.canvas-container {
+     margin-top: 30px; /* Aumenta ou ajusta o espaço acima do canvas */
+}
