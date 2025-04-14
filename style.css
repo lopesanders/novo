@@ -154,7 +154,7 @@ button:not(:disabled):hover {
 
 #exampleImage {
     display: block; /* Para poder usar margin: auto */
-    max-width: 70%;   /* Limita a largura da imagem de exemplo (ajuste conforme necessário) */
+    max-width: 20%;   /* Limita a largura da imagem de exemplo (ajuste conforme necessário) */
     height: auto;     /* Mantém a proporção da imagem */
     margin-left: auto; /* Centraliza a imagem horizontalmente */
     margin-right: auto;/* Centraliza a imagem horizontalmente */
