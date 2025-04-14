@@ -10,17 +10,19 @@
 
     <div class="container">
         <h1>Crie sua Imagem Personalizada</h1>
-        <p>Envie sua foto e veja a mágica acontecer!</p>
+        <p>Envie sua foto, ajuste a posição e o zoom, e baixe!</p>
 
         <label for="imageLoader" class="custom-file-upload">
             Escolher Foto
         </label>
         <input type="file" id="imageLoader" accept="image/*"/>
 
-        <div class="canvas-container">
-            <canvas id="imageCanvas"></canvas>
-            <p id="loadingMessage" style="display: none;">Carregando e processando imagem...</p>
+        <div id="editorArea" class="canvas-container">
+             <canvas id="imageCanvas"></canvas>
+             <p id="loadingMessage" style="display: none;">Carregando e processando imagem...</p>
+             <p id="instructionMessage" style="display: none;">Clique e arraste para mover. Use o scroll do mouse para zoom.</p>
         </div>
+
 
         <button id="downloadBtn" disabled>Baixar Imagem</button>
 
