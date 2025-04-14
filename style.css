@@ -57,7 +57,9 @@ input[type="file"] {
     max-width: 100%; /* Garante que não ultrapasse o container */
     border: 1px dashed #ccc; /* Borda suave para visualização */
     min-height: 100px; /* Altura mínima para quando estiver vazio */
-    position: relative; /* Para a mensagem de loading */
+    position: relative; /* Para mensagens e posicionamento */
+    overflow: hidden; /* Importante para esconder partes da imagem fora do canvas */
+    touch-action: none; /* Desabilita scroll padrão da página ao tocar no canvas */
 }
 
 /* O canvas terá seu tamanho definido pelo JS, mas controlamos o max */
@@ -66,9 +68,14 @@ input[type="file"] {
     max-width: 100%; /* Faz o canvas ser responsivo */
     height: auto;   /* Mantém a proporção */
     margin: 0 auto; /* Centraliza se for menor que o container */
+    cursor: grab; /* Cursor inicial para indicar que é móvel */
+}
+#imageCanvas:active {
+    cursor: grabbing; /* Cursor enquanto arrasta */
 }
 
-#loadingMessage {
+
+#loadingMessage, #instructionMessage {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -77,6 +84,12 @@ input[type="file"] {
     padding: 10px;
     border-radius: 5px;
     color: #333;
+    pointer-events: none; /* Mensagens não devem interceptar cliques */
+    z-index: 10; /* Garante que fique sobre o canvas se necessário */
+}
+#instructionMessage {
+     top: 15px; /* Posiciona a instrução no topo */
+     transform: translate(-50%, 0);
 }
 
 
