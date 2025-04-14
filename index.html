@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Criador de Imagem com Template</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <h1>Crie sua Imagem Personalizada</h1>
+        <p>Envie sua foto e veja a mágica acontecer!</p>
+
+        <label for="imageLoader" class="custom-file-upload">
+            Escolher Foto
+        </label>
+        <input type="file" id="imageLoader" accept="image/*"/>
+
+        <div class="canvas-container">
+            <canvas id="imageCanvas"></canvas>
+            <p id="loadingMessage" style="display: none;">Carregando e processando imagem...</p>
+        </div>
+
+        <button id="downloadBtn" disabled>Baixar Imagem</button>
+
+        <button id="shareBtn" style="display: none;">Compartilhar</button>
+
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
